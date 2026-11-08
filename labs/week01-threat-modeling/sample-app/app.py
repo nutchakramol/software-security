@@ -4,11 +4,14 @@ You will NOT exploit this in Week 1 — you will draw a data-flow diagram
 and apply STRIDE to its components (web client, app, SQLite DB, /upload).
 """
 from flask import Flask, request, jsonify, send_from_directory
-import sqlite3, os
+from werkzeug.utils import secure_filename
+import sqlite3, os, uuid
 
 app = Flask(__name__)
 DB = "notes.db"
 UPLOAD_DIR = "uploads"
+ALLOWED_EXT = {".txt", ".png", ".jpg", ".pdf"}
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024  # 2 MB upload limit
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def init_db():
@@ -30,9 +33,22 @@ def notes():
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    f = request.files["file"]
-    f.save(os.path.join(UPLOAD_DIR, f.filename))
-    return {"saved": f.filename}
+    f = request.files.get("file")
+    if f is None or not f.filename:
+        return {"error": "no file"}, 400
+
+    safe = secure_filename(f.filename)
+    ext = os.path.splitext(safe)[1].lower()
+    if not safe or ext not in ALLOWED_EXT:
+        return {"error": "invalid file type"}, 400
+
+    stored = uuid.uuid4().hex + ext  # server-chosen name, never the client's
+    dest = os.path.realpath(os.path.join(UPLOAD_DIR, stored))
+    if not dest.startswith(os.path.realpath(UPLOAD_DIR) + os.sep):
+        return {"error": "invalid path"}, 400
+
+    f.save(dest)
+    return {"saved": stored}
 
 @app.route("/files/<name>")
 def files(name):
